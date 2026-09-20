@@ -66,7 +66,12 @@ Data de hoje: ${todayStr}. Data em que os registros serão salvos: ${date}.
 PERFIL:
 ${profileSummary(profile)}
 RESUMO DO DIA (${date}):
-{{TOTALS}}`
+{{TOTALS}}
+
+CONVERSA ANTERIOR (apenas contexto — NÃO gere entries a partir dela):
+{{HISTORY}}
+
+A PRÓXIMA MENSAGEM DO USUÁRIO É A ÚNICA FONTE DE NOVOS REGISTROS.`
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -88,13 +93,13 @@ Deno.serve(async (req) => {
     const t = totals((todayEntries ?? []) as EntryRow[])
     const todayStr = new Date().toLocaleDateString('pt-BR', { timeZone: tz ?? 'America/Sao_Paulo', dateStyle: 'full' })
     const registered = ((todayEntries ?? []) as EntryRow[]).map((e) => `- [${e.kind}] ${e.title}: ${String(e.details?.items ?? '')}`).join('\n')
-    const system = SYSTEM(profile as Profile | null, todayStr, date).replace(
-      '{{TOTALS}}',
-      `${totalsSummary(t, profile as Profile | null)}\nJá registrado hoje:\n${registered || '(nada)'}`,
-    )
-
     const convo = ((history ?? []) as { role: 'user' | 'assistant'; content: string }[]).reverse()
-    const out = await openaiJSON<ChatOut>(system, [...convo, { role: 'user', content: message }], SCHEMA, 'chat_result')
+    const historyText = convo.map((m) => `${m.role === 'user' ? 'Usuário' : 'Coach'}: ${m.content}`).join('\n') || '(vazia)'
+    const system = SYSTEM(profile as Profile | null, todayStr, date)
+      .replace('{{TOTALS}}', `${totalsSummary(t, profile as Profile | null)}\nJá registrado hoje:\n${registered || '(nada)'}`)
+      .replace('{{HISTORY}}', historyText)
+
+    const out = await openaiJSON<ChatOut>(system, [{ role: 'user', content: message }], SCHEMA, 'chat_result')
 
     const rows: EntryRow[] = out.entries.map((e) => {
       const eats = e.kind === 'meal' || e.kind === 'supplement'
