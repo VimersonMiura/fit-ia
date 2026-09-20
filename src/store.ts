@@ -16,6 +16,7 @@ interface State {
   deleteEntry: (id: string) => Promise<void>
   loadMessages: () => Promise<void>
   sendMessage: (content: string, date: string) => Promise<{ reply: string; entries: Entry[] }>
+  fetchSpeech: (text: string) => Promise<Blob>
   loadFeedback: (date: string) => Promise<void>
   generateFeedback: (date: string) => Promise<DailyFeedback>
   signOut: () => Promise<void>
@@ -23,11 +24,11 @@ interface State {
 
 const fnUrl = (name: string) => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`
 
-async function callFn<T>(name: string, body: unknown): Promise<T> {
+async function callRaw(name: string, body: unknown): Promise<Response> {
   const { data } = await supabase.auth.getSession()
   const token = data.session?.access_token
   if (!token) throw new Error('Sessão expirada. Entre novamente.')
-  const res = await fetch(fnUrl(name), {
+  return fetch(fnUrl(name), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -36,6 +37,10 @@ async function callFn<T>(name: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
   })
+}
+
+async function callFn<T>(name: string, body: unknown): Promise<T> {
+  const res = await callRaw(name, body)
   const json = (await res.json().catch(() => ({}))) as T & { error?: string }
   if (!res.ok) throw new Error(json.error ?? `Erro ${res.status}`)
   return json
@@ -116,6 +121,12 @@ export const useStore = create<State>()((set, get) => ({
       entries: [...s.entries, ...res.entries.filter((e) => e.date === date)],
     }))
     return res
+  },
+
+  fetchSpeech: async (text) => {
+    const res = await callRaw('tts', { text })
+    if (!res.ok) throw new Error(`TTS ${res.status}`)
+    return res.blob()
   },
 
   loadFeedback: async (date) => {

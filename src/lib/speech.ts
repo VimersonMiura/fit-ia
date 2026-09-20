@@ -86,19 +86,73 @@ export function useSpeechInput(onFinal: (text: string) => void) {
   return { listening, interim, error, start, stop }
 }
 
-export const ttsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
+const browserTTS = typeof window !== 'undefined' && 'speechSynthesis' in window
+export const ttsSupported = typeof window !== 'undefined' && (browserTTS || 'Audio' in window)
 
-export function speak(text: string) {
-  if (!ttsSupported) return
-  window.speechSynthesis.cancel()
-  const clean = text.replace(/[*#_`>]/g, '').replace(/[\p{Extended_Pictographic}]/gu, '')
-  const u = new SpeechSynthesisUtterance(clean)
+const cleanForSpeech = (text: string) => text.replace(/[*#_`>]/g, '').replace(/[\p{Extended_Pictographic}]/gu, '').trim()
+
+let audio: HTMLAudioElement | null = null
+let audioUrl: string | null = null
+
+export function primeAudio() {
+  if (!('Audio' in window)) return
+  if (!audio) audio = new Audio()
+  audio.muted = true
+  audio.play().catch(() => undefined)
+  audio.pause()
+  audio.muted = false
+}
+
+const FEMALE_HINTS = ['female', 'feminin', 'mulher', 'francisca', 'luciana', 'maria', 'vitoria', 'vitória', 'camila', 'joana', 'brasil']
+
+function pickBrowserVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.replace('_', '-').toLowerCase().startsWith('pt-br'))
+  const female = voices.find((v) => FEMALE_HINTS.some((h) => v.name.toLowerCase().includes(h)))
+  return female ?? voices[0] ?? null
+}
+
+function speakWithBrowser(text: string) {
+  if (!browserTTS) return
+  const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'
-  const voice = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith('pt-BR')) ?? null
+  u.rate = 1.02
+  u.pitch = 1.05
+  const voice = pickBrowserVoice()
   if (voice) u.voice = voice
   window.speechSynthesis.speak(u)
 }
 
+export type TtsFetcher = (text: string) => Promise<Blob>
+
+export async function speak(text: string, fetchAudio?: TtsFetcher) {
+  stopSpeaking()
+  const clean = cleanForSpeech(text)
+  if (!clean) return
+  if (fetchAudio) {
+    try {
+      const blob = await fetchAudio(clean)
+      audioUrl = URL.createObjectURL(blob)
+      if (!audio) audio = new Audio()
+      audio.src = audioUrl
+      audio.onended = stopSpeaking
+      await audio.play()
+      return
+    } catch {
+      stopSpeaking()
+    }
+  }
+  speakWithBrowser(clean)
+}
+
 export function stopSpeaking() {
-  if (ttsSupported) window.speechSynthesis.cancel()
+  if (browserTTS) window.speechSynthesis.cancel()
+  if (audio) {
+    audio.pause()
+    audio.onended = null
+    audio.removeAttribute('src')
+  }
+  if (audioUrl) {
+    URL.revokeObjectURL(audioUrl)
+    audioUrl = null
+  }
 }

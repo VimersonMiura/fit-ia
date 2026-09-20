@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { todayISO } from '../lib/nutrition'
-import { speak, speechSupported, stopSpeaking, ttsSupported, useSpeechInput } from '../lib/speech'
+import { primeAudio, speak, speechSupported, stopSpeaking, ttsSupported, useSpeechInput } from '../lib/speech'
 import { useStore } from '../store'
 import { KIND_ICONS } from '../types'
 
@@ -15,7 +15,7 @@ const SUGGESTIONS = [
 const VOICE_KEY = 'fitia.voiceReply'
 
 export function ChatPage() {
-  const { messages, loadMessages, sendMessage, profile } = useStore()
+  const { messages, loadMessages, sendMessage, fetchSpeech, profile } = useStore()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -44,7 +44,7 @@ export function ChatPage() {
       try {
         const res = await sendMessage(content.trim(), todayISO())
         setLastSaved(res.entries.map((e) => `${KIND_ICONS[e.kind]} ${e.title}`))
-        if (spoken && voiceReply) speak(res.reply)
+        if (spoken && voiceReply) void speak(res.reply, fetchSpeech)
       } catch (e) {
         setErr(e instanceof Error ? e.message : 'Falha ao enviar')
       } finally {
@@ -52,7 +52,7 @@ export function ChatPage() {
         busyRef.current = false
       }
     },
-    [sendMessage, voiceReply],
+    [sendMessage, fetchSpeech, voiceReply],
   )
 
   const onSpeech = useCallback((t: string) => void send(t, true), [send])
@@ -129,7 +129,15 @@ export function ChatPage() {
           <button
             type="button"
             className={`btn-primary round mic ${mic.listening ? 'listening' : ''}`}
-            onClick={() => (mic.listening ? mic.stop() : (stopSpeaking(), mic.start()))}
+            onClick={() => {
+              if (mic.listening) {
+                mic.stop()
+              } else {
+                stopSpeaking()
+                primeAudio()
+                mic.start()
+              }
+            }}
             disabled={busy}
             aria-label={mic.listening ? 'Parar e enviar' : 'Falar'}
           >
