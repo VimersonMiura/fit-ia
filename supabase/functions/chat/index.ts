@@ -59,7 +59,7 @@ const SCHEMA = {
 const SYSTEM = (profile: Profile | null, todayStr: string, date: string) => `Você é o coach pessoal de nutrição e treino do app FitIA, falando português do Brasil, direto, motivador e realista.
 O usuário conversa livremente sobre seu dia: refeições, água, treinos (musculação, jiu jitsu, corrida...), suplementos, manipulados, vitaminas, peso, sono.
 Sua tarefa: (1) extrair TUDO que for registrável em "entries" com estimativas nutricionais razoáveis para porções brasileiras (use tabela TACO/USDA como referência; se a porção não foi dita, assuma porção média e diga isso na resposta); (2) estimar calorias gastas em treinos usando peso do usuário e MET (jiu jitsu ~10 MET, musculação ~5 MET, corrida leve ~8 MET, caminhada ~3.5 MET); (3) responder de forma curta com um comentário útil relacionado ao objetivo dele.
-Regras: não registre nada se a mensagem for só pergunta ou conversa; não duplique itens já registrados hoje; suplementos como whey/creatina contam calorias/proteína; manipulados e vitaminas registre como kind=supplement com kcal 0; água em ml (1 copo = 250 ml, 1 garrafa = 500 ml se não especificado). Se o usuário informou o peso, preencha profile_updates.weight_kg.
+Regras: registre APENAS o que está na última mensagem do usuário (o histórico é só contexto, já foi registrado); não registre nada se a mensagem for só pergunta ou conversa; não duplique itens já registrados hoje; suplementos como whey/creatina contam calorias/proteína; manipulados e vitaminas registre como kind=supplement com kcal 0; água em ml (1 copo = 250 ml, 1 garrafa = 500 ml se não especificado). Se o usuário informou o peso, preencha profile_updates.weight_kg.
 Se o usuário pedir um resumo, use o resumo do dia abaixo. Não invente dados que não estão no resumo.
 
 Data de hoje: ${todayStr}. Data em que os registros serão salvos: ${date}.
@@ -96,21 +96,25 @@ Deno.serve(async (req) => {
     const convo = ((history ?? []) as { role: 'user' | 'assistant'; content: string }[]).reverse()
     const out = await openaiJSON<ChatOut>(system, [...convo, { role: 'user', content: message }], SCHEMA, 'chat_result')
 
-    const rows: EntryRow[] = out.entries.map((e) => ({
+    const rows: EntryRow[] = out.entries.map((e) => {
+      const eats = e.kind === 'meal' || e.kind === 'supplement'
+      const trains = e.kind === 'workout'
+      return {
       user_id: uid,
       date,
       kind: e.kind,
       title: e.title,
       details: { items: e.items },
-      kcal: Math.max(0, Math.round(e.kcal)),
-      protein_g: Math.max(0, Math.round(e.protein_g)),
-      carbs_g: Math.max(0, Math.round(e.carbs_g)),
-      fat_g: Math.max(0, Math.round(e.fat_g)),
+      kcal: eats ? Math.max(0, Math.round(e.kcal)) : 0,
+      protein_g: eats ? Math.max(0, Math.round(e.protein_g)) : 0,
+      carbs_g: eats ? Math.max(0, Math.round(e.carbs_g)) : 0,
+      fat_g: eats ? Math.max(0, Math.round(e.fat_g)) : 0,
       water_ml: Math.max(0, Math.round(e.water_ml)),
-      kcal_burned: Math.max(0, Math.round(e.kcal_burned)),
+      kcal_burned: trains ? Math.max(0, Math.round(e.kcal_burned)) : 0,
       duration_min: e.duration_min > 0 ? Math.round(e.duration_min) : null,
       weight_kg: e.weight_kg > 0 ? e.weight_kg : null,
-    }))
+      }
+    })
 
     let inserted: EntryRow[] = []
     if (rows.length) {
